@@ -167,6 +167,16 @@ jobs:
           patch --batch --forward -p1 < /tmp/launcher3-folder-reorder-hotfix.patch
           grep -n "captureBounds" app/src/main/java/br/com/danilo/feedlauncher/classic/L3FolderReorderController.java
 
+      - name: Apply Feed initial and Classic routing fix
+        run: |
+          base64 --decode ci/patches/feed-initial-classic-routing-fix.patch.gz.b64 > /tmp/feed-initial-classic-routing-fix.patch.gz
+          gzip -dc /tmp/feed-initial-classic-routing-fix.patch.gz > /tmp/feed-initial-classic-routing-fix.patch
+          cd source
+          patch --batch --forward -p1 < /tmp/feed-initial-classic-routing-fix.patch
+          grep -n "versionCode\\|versionName" app/build.gradle
+          grep -n "MainActivity é sempre a HOME/Feed do sistema" app/src/main/java/br/com/danilo/feedlauncher/MainActivity.java
+          grep -n "seedWorkspaceFromInstalledAppsIfEmpty" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicHomeActivity.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
@@ -187,12 +197,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.15-Launcher3-Folder-Reorder-Page-Refresh-release.apk
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.16-Feed-Initial-Classic-Routing-Fix-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FeedLauncher-v0.31.15-Launcher3-Folder-Reorder-Page-Refresh-APK
-          path: out/FeedLauncher-v0.31.15-Launcher3-Folder-Reorder-Page-Refresh-release.apk
+          name: FeedLauncher-v0.31.16-Feed-Initial-Classic-Routing-Fix-APK
+          path: out/FeedLauncher-v0.31.16-Feed-Initial-Classic-Routing-Fix-release.apk
           if-no-files-found: error
           retention-days: 14
