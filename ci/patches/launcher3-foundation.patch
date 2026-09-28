@@ -1,0 +1,331 @@
+diff --git a/ALTERACOES-v0.31.04-Launcher3-Foundation.md b/ALTERACOES-v0.31.04-Launcher3-Foundation.md
+new file mode 100644
+index 0000000..7ac2df1
+--- /dev/null
++++ b/ALTERACOES-v0.31.04-Launcher3-Foundation.md
+@@ -0,0 +1,25 @@
++# FeedLauncher v0.31.04 — Launcher3 Foundation
++
++Base: `FeedLauncher-v0.31.03b-Recovery-Source`.
++
++Objetivo desta rodada: aproximar o Modo Clássico da estrutura real do AOSP Launcher3 sem importar Quickstep/SystemUI e sem alterar o Modo Feed.
++
++## Portado/adaptado do Launcher3
++
++- `util/GridOccupancy` -> `classic/L3GridOccupancy` (Apache-2.0).
++- `ClassicCellLayout` passa a construir e consultar snapshot de ocupação no mesmo modelo X-major usado pelo Launcher3.
++- `L3ReorderEngine` deixa de manter uma segunda implementação solta de `boolean[][]` e usa `L3GridOccupancy` para marcar, copiar e validar células.
++- O algoritmo de reorder existente (push cluster, block move, individual move e closest empty space) permanece ativo, agora sobre a mesma abstração de ocupação do Launcher3.
++
++## Preservado
++
++- Modo Feed sem alterações.
++- Layout/tema visual do Modo Clássico.
++- Persistência `ClassicLayoutStore`.
++- Drag interno `L3ItemDragController`.
++- Widgets, resize e AppWidgetHost existentes.
++- Sem `View.startDragAndDrop()` no runtime Classic.
++
++## Referência
++
++AOSP Launcher3 / Apache License 2.0, com foco em `util/GridOccupancy`, `CellLayout` e `celllayout/ReorderAlgorithm`.
+diff --git a/app/build.gradle b/app/build.gradle
+index 8e7fb2e..27699ee 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -8,8 +8,8 @@ android {
+         applicationId 'br.com.danilo.feedlauncher'
+         minSdk 26
+         targetSdk 35
+-        versionCode 284
+-        versionName '0.31.03b-recovery'
++        versionCode 285
++        versionName '0.31.04-launcher3-foundation'
+     }
+ 
+     signingConfigs {
+diff --git a/app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java b/app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
+index 0a94c59..58bd931 100644
+--- a/app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
++++ b/app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
+@@ -71,13 +71,7 @@ public final class ClassicCellLayout extends ViewGroup {
+     }
+ 
+     public boolean regionFree(int x,int y,int sx,int sy,String ignoreId){
+-        if(x<0||y<0||sx<1||sy<1||x+sx>cols||y+sy>rows)return false;
+-        for(int i=0;i<getChildCount();i++){
+-            LayoutParams lp=(LayoutParams)getChildAt(i).getLayoutParams();
+-            if(ignoreId!=null&&ignoreId.equals(lp.itemId))continue;
+-            if(overlaps(x,y,sx,sy,lp.cellX,lp.cellY,lp.spanX,lp.spanY))return false;
+-        }
+-        return true;
++        return buildOccupancy(ignoreId).isRegionVacant(x,y,sx,sy);
+     }
+ 
+     public String itemAtCell(int x,int y,String ignoreId){
+@@ -105,15 +99,29 @@ public final class ClassicCellLayout extends ViewGroup {
+     }
+ 
+     public int[] nearestFree(int desiredX,int desiredY,int sx,int sy,String ignoreId){
++        L3GridOccupancy occupied=buildOccupancy(ignoreId);
+         int bestD=Integer.MAX_VALUE,bestX=-1,bestY=-1;
+         for(int y=0;y<=rows-sy;y++)for(int x=0;x<=cols-sx;x++){
+-            if(!regionFree(x,y,sx,sy,ignoreId))continue;
++            if(!occupied.isRegionVacant(x,y,sx,sy))continue;
+             int d=Math.abs(x-desiredX)+Math.abs(y-desiredY);
+             if(d<bestD){bestD=d;bestX=x;bestY=y;}
+         }
+         return bestX<0?null:new int[]{bestX,bestY};
+     }
+ 
++    /** Snapshot of the visible page using Launcher3-style grid occupancy. */
++    L3GridOccupancy buildOccupancy(String ignoreId){
++        L3GridOccupancy occupied=new L3GridOccupancy(cols,rows);
++        for(int i=0;i<getChildCount();i++){
++            View child=getChildAt(i);
++            if(!(child.getLayoutParams() instanceof LayoutParams))continue;
++            LayoutParams lp=(LayoutParams)child.getLayoutParams();
++            if(ignoreId!=null&&ignoreId.equals(lp.itemId))continue;
++            occupied.markCells(lp.cellX,lp.cellY,lp.spanX,lp.spanY,true);
++        }
++        return occupied;
++    }
++
+     public void showDropPreview(int x,int y,int sx,int sy,boolean valid){
+         hoverX=x;hoverY=y;hoverSpanX=Math.max(1,sx);hoverSpanY=Math.max(1,sy);hoverValid=valid;invalidate();
+     }
+diff --git a/app/src/main/java/br/com/danilo/feedlauncher/classic/L3GridOccupancy.java b/app/src/main/java/br/com/danilo/feedlauncher/classic/L3GridOccupancy.java
+new file mode 100644
+index 0000000..49409fc
+--- /dev/null
++++ b/app/src/main/java/br/com/danilo/feedlauncher/classic/L3GridOccupancy.java
+@@ -0,0 +1,78 @@
++/*
++ * Copyright (C) The Android Open Source Project
++ * Copyright (C) 2026 FeedLauncher contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package br.com.danilo.feedlauncher.classic;
++
++import android.graphics.Rect;
++
++/**
++ * Dependency-free adaptation of Launcher3 util/GridOccupancy for Classic mode.
++ *
++ * The public behaviour intentionally follows AOSP Launcher3: X-major boolean grid,
++ * first-vacant search, region vacancy checks, cell marking, copying and clearing.
++ */
++final class L3GridOccupancy {
++    private final int countX;
++    private final int countY;
++    final boolean[][] cells;
++
++    L3GridOccupancy(int countX,int countY){
++        this.countX=Math.max(1,countX);
++        this.countY=Math.max(1,countY);
++        cells=new boolean[this.countX][this.countY];
++    }
++
++    boolean findVacantCell(int[] out,int spanX,int spanY){
++        if(out==null||out.length<2)return false;
++        for(int y=0;y+spanY<=countY;y++){
++            for(int x=0;x+spanX<=countX;x++){
++                if(isRegionVacant(x,y,spanX,spanY)){
++                    out[0]=x;out[1]=y;return true;
++                }
++            }
++        }
++        out[0]=out[1]=-1;return false;
++    }
++
++    void copyTo(L3GridOccupancy dest){
++        if(dest==null||dest.countX!=countX||dest.countY!=countY)throw new IllegalArgumentException("Grid size mismatch");
++        for(int x=0;x<countX;x++)System.arraycopy(cells[x],0,dest.cells[x],0,countY);
++    }
++
++    L3GridOccupancy copy(){
++        L3GridOccupancy dest=new L3GridOccupancy(countX,countY);copyTo(dest);return dest;
++    }
++
++    boolean isRegionVacant(int x,int y,int spanX,int spanY){
++        int x2=x+spanX-1,y2=y+spanY-1;
++        if(x<0||y<0||spanX<1||spanY<1||x2>=countX||y2>=countY)return false;
++        for(int i=x;i<=x2;i++)for(int j=y;j<=y2;j++)if(cells[i][j])return false;
++        return true;
++    }
++
++    void markCells(int cellX,int cellY,int spanX,int spanY,boolean value){
++        if(cellX<0||cellY<0||spanX<1||spanY<1)return;
++        for(int x=cellX;x<cellX+spanX&&x<countX;x++){
++            for(int y=cellY;y<cellY+spanY&&y<countY;y++)cells[x][y]=value;
++        }
++    }
++
++    void markCells(Rect r,boolean value){
++        if(r!=null)markCells(r.left,r.top,r.width(),r.height(),value);
++    }
++
++    void clear(){markCells(0,0,countX,countY,false);}
++}
+diff --git a/app/src/main/java/br/com/danilo/feedlauncher/classic/L3ReorderEngine.java b/app/src/main/java/br/com/danilo/feedlauncher/classic/L3ReorderEngine.java
+index 6003f95..f920c16 100644
+--- a/app/src/main/java/br/com/danilo/feedlauncher/classic/L3ReorderEngine.java
++++ b/app/src/main/java/br/com/danilo/feedlauncher/classic/L3ReorderEngine.java
+@@ -82,7 +82,7 @@ final class L3ReorderEngine {
+         int[] direction=new int[]{Integer.signum(dirX),Integer.signum(dirY)};
+         if(direction[0]==0&&direction[1]==0){direction[0]=1;}
+         Solution solution=copyCurrentState();
+-        boolean[][] occupied=buildOccupied(solution);
++        L3GridOccupancy occupied=buildOccupied(solution);
+         if(!rearrangementExists(cellX,cellY,spanX,spanY,direction,solution,occupied)){
+             solution.isSolution=false;return solution;
+         }
+@@ -96,7 +96,7 @@ final class L3ReorderEngine {
+ 
+     private Solution findReorderSolutionRecursive(int pixelX,int pixelY,int minSpanX,int minSpanY,int spanX,int spanY,int[] direction,boolean decX){
+         Solution solution=copyCurrentState();
+-        boolean[][] occupied=buildOccupied(solution);
++        L3GridOccupancy occupied=buildOccupied(solution);
+         int[] result=findNearestAreaIgnoreOccupied(pixelX,pixelY,spanX,spanY);
+         boolean success=result[0]>=0&&rearrangementExists(result[0],result[1],spanX,spanY,direction,solution,occupied);
+         if(!success){
+@@ -120,12 +120,13 @@ final class L3ReorderEngine {
+         for(ClassicLayoutStore.Item i:sorted){s.map.put(i.id,new CellAndSpan(i.cellX,i.cellY,i.spanX,i.spanY));s.sortedIds.add(i.id);}return s;
+     }
+ 
+-    private boolean[][] buildOccupied(Solution s){
+-        boolean[][] out=new boolean[countX][countY];
+-        for(CellAndSpan c:s.map.values())mark(out,c.cellX,c.cellY,c.spanX,c.spanY,true);return out;
++    private L3GridOccupancy buildOccupied(Solution s){
++        L3GridOccupancy out=new L3GridOccupancy(countX,countY);
++        for(CellAndSpan c:s.map.values())out.markCells(c.cellX,c.cellY,c.spanX,c.spanY,true);
++        return out;
+     }
+ 
+-    private boolean rearrangementExists(int cellX,int cellY,int spanX,int spanY,int[] direction,Solution solution,boolean[][] occupied){
++    private boolean rearrangementExists(int cellX,int cellY,int spanX,int spanY,int[] direction,Solution solution,L3GridOccupancy occupied){
+         if(cellX<0||cellY<0)return false;
+         Rect desired=new Rect(cellX,cellY,cellX+spanX,cellY+spanY);
+         ArrayList<String> intersecting=new ArrayList<>();
+@@ -141,16 +142,16 @@ final class L3ReorderEngine {
+         return true;
+     }
+ 
+-    private boolean addViewToTempLocation(String id,Rect desired,int[] direction,Solution state,boolean[][] occupied){
++    private boolean addViewToTempLocation(String id,Rect desired,int[] direction,Solution state,L3GridOccupancy occupied){
+         CellAndSpan c=state.map.get(id);if(c==null)return false;
+-        mark(occupied,c.cellX,c.cellY,c.spanX,c.spanY,false);mark(occupied,desired.left,desired.top,desired.width(),desired.height(),true);
+-        int[] loc=findNearestArea(c.cellX,c.cellY,c.spanX,c.spanY,direction,occupied,null);
++        occupied.markCells(c.cellX,c.cellY,c.spanX,c.spanY,false);occupied.markCells(desired.left,desired.top,desired.width(),desired.height(),true);
++        int[] loc=findNearestArea(c.cellX,c.cellY,c.spanX,c.spanY,direction,occupied.cells,null);
+         boolean ok=loc[0]>=0;
+         if(ok){c.cellX=loc[0];c.cellY=loc[1];}
+-        mark(occupied,c.cellX,c.cellY,c.spanX,c.spanY,true);return ok;
++        occupied.markCells(c.cellX,c.cellY,c.spanX,c.spanY,true);return ok;
+     }
+ 
+-    private boolean attemptPushInDirection(ArrayList<String> ids,Rect desired,int[] direction,Solution state,boolean[][] occupied){
++    private boolean attemptPushInDirection(ArrayList<String> ids,Rect desired,int[] direction,Solution state,L3GridOccupancy occupied){
+         if(ids.isEmpty())return true;
+         int[] d=new int[]{direction[0],direction[1]};
+         if(Math.abs(d[0])+Math.abs(d[1])>1){
+@@ -167,8 +168,8 @@ final class L3ReorderEngine {
+         return false;
+     }
+ 
+-    private boolean pushViewsToTempLocation(ArrayList<String> initial,Rect desired,int[] direction,Solution state,boolean[][] occupied){
+-        Solution before=state.deepCopy();boolean[][] occBefore=copyGrid(occupied);
++    private boolean pushViewsToTempLocation(ArrayList<String> initial,Rect desired,int[] direction,Solution state,L3GridOccupancy occupied){
++        Solution before=state.deepCopy();L3GridOccupancy occBefore=occupied.copy();
+         ArrayList<String> cluster=new ArrayList<>(initial);
+         Rect clusterRect=boundingRect(cluster,state);
+         final int LEFT=1,TOP=2,RIGHT=4,BOTTOM=8;int edge;int distance;
+@@ -177,34 +178,34 @@ final class L3ReorderEngine {
+         else if(direction[1]<0){edge=TOP;distance=clusterRect.bottom-desired.top;}
+         else{edge=BOTTOM;distance=desired.bottom-clusterRect.top;}
+         if(distance<=0)return false;
+-        for(String id:cluster){CellAndSpan c=state.map.get(id);mark(occupied,c.cellX,c.cellY,c.spanX,c.spanY,false);}
++        for(String id:cluster){CellAndSpan c=state.map.get(id);occupied.markCells(c.cellX,c.cellY,c.spanX,c.spanY,false);}
+         while(distance>0){
+             ArrayList<String> sorted=new ArrayList<>(state.sortedIds);sortForEdge(sorted,state,edge);
+             for(String id:sorted){
+                 if(cluster.contains(id))continue;
+                 if(touchesClusterEdge(id,cluster,state,edge)){
+-                    cluster.add(id);CellAndSpan c=state.map.get(id);mark(occupied,c.cellX,c.cellY,c.spanX,c.spanY,false);
++                    cluster.add(id);CellAndSpan c=state.map.get(id);occupied.markCells(c.cellX,c.cellY,c.spanX,c.spanY,false);
+                 }
+             }
+             shiftCluster(cluster,state,edge,1);distance--;
+         }
+         clusterRect=boundingRect(cluster,state);
+         boolean ok=clusterRect.left>=0&&clusterRect.top>=0&&clusterRect.right<=countX&&clusterRect.bottom<=countY;
+-        if(!ok){restoreState(state,before);restoreGrid(occupied,occBefore);return false;}
+-        for(String id:cluster){CellAndSpan c=state.map.get(id);mark(occupied,c.cellX,c.cellY,c.spanX,c.spanY,true);}return true;
++        if(!ok){restoreState(state,before);occBefore.copyTo(occupied);return false;}
++        for(String id:cluster){CellAndSpan c=state.map.get(id);occupied.markCells(c.cellX,c.cellY,c.spanX,c.spanY,true);}return true;
+     }
+ 
+-    private boolean addViewsToTempLocation(ArrayList<String> ids,Rect desired,int[] direction,Solution state,boolean[][] occupied){
++    private boolean addViewsToTempLocation(ArrayList<String> ids,Rect desired,int[] direction,Solution state,L3GridOccupancy occupied){
+         if(ids.isEmpty())return true;
+-        Rect bounds=boundingRect(ids,state);boolean[][] before=copyGrid(occupied);Solution saved=state.deepCopy();
+-        for(String id:ids){CellAndSpan c=state.map.get(id);mark(occupied,c.cellX,c.cellY,c.spanX,c.spanY,false);}
++        Rect bounds=boundingRect(ids,state);L3GridOccupancy before=occupied.copy();Solution saved=state.deepCopy();
++        for(String id:ids){CellAndSpan c=state.map.get(id);occupied.markCells(c.cellX,c.cellY,c.spanX,c.spanY,false);}
+         boolean[][] block=new boolean[Math.max(1,bounds.width())][Math.max(1,bounds.height())];
+-        for(String id:ids){CellAndSpan c=state.map.get(id);mark(block,c.cellX-bounds.left,c.cellY-bounds.top,c.spanX,c.spanY,true);}
+-        mark(occupied,desired.left,desired.top,desired.width(),desired.height(),true);
+-        int[] loc=findNearestArea(bounds.left,bounds.top,bounds.width(),bounds.height(),direction,occupied,block);
+-        if(loc[0]<0){restoreState(state,saved);restoreGrid(occupied,before);return false;}
++        for(String id:ids){CellAndSpan c=state.map.get(id);markGrid(block,c.cellX-bounds.left,c.cellY-bounds.top,c.spanX,c.spanY,true);}
++        occupied.markCells(desired.left,desired.top,desired.width(),desired.height(),true);
++        int[] loc=findNearestArea(bounds.left,bounds.top,bounds.width(),bounds.height(),direction,occupied.cells,block);
++        if(loc[0]<0){restoreState(state,saved);before.copyTo(occupied);return false;}
+         int dx=loc[0]-bounds.left,dy=loc[1]-bounds.top;
+-        for(String id:ids){CellAndSpan c=state.map.get(id);c.cellX+=dx;c.cellY+=dy;mark(occupied,c.cellX,c.cellY,c.spanX,c.spanY,true);}return true;
++        for(String id:ids){CellAndSpan c=state.map.get(id);c.cellX+=dx;c.cellY+=dy;occupied.markCells(c.cellX,c.cellY,c.spanX,c.spanY,true);}return true;
+     }
+ 
+     private Solution dropInPlaceSolution(int pixelX,int pixelY,int spanX,int spanY){
+@@ -215,14 +216,14 @@ final class L3ReorderEngine {
+     }
+ 
+     private Solution closestEmptySpaceReorder(int pixelX,int pixelY,int minSpanX,int minSpanY,int spanX,int spanY){
+-        boolean[][] occupied=buildOccupied(copyCurrentState());double best=Double.MAX_VALUE;Solution bestSol=null;
++        L3GridOccupancy occupied=buildOccupied(copyCurrentState());double best=Double.MAX_VALUE;Solution bestSol=null;
+         boolean incX=true; // Same expansion preference as Launcher3: grow X then Y.
+         for(int y=0;y<countY;y++)for(int x=0;x<countX;x++){
+-            if(!isVacant(occupied,x,y,minSpanX,minSpanY))continue;
++            if(!occupied.isRegionVacant(x,y,minSpanX,minSpanY))continue;
+             int sx=minSpanX,sy=minSpanY;boolean hitX=sx>=spanX,hitY=sy>=spanY;boolean localIncX=incX;
+             while(!(hitX&&hitY)){
+-                if(localIncX&&!hitX){if(isVacant(occupied,x,y,sx+1,sy))sx++;else hitX=true;}
+-                else if(!hitY){if(isVacant(occupied,x,y,sx,sy+1))sy++;else hitY=true;}
++                if(localIncX&&!hitX){if(occupied.isRegionVacant(x,y,sx+1,sy))sx++;else hitX=true;}
++                else if(!hitY){if(occupied.isRegionVacant(x,y,sx,sy+1))sy++;else hitY=true;}
+                 hitX|=sx>=spanX;hitY|=sy>=spanY;localIncX=!localIncX;
+             }
+             float cx=(x+.5f)*cellW,cy=(y+.5f)*cellH;double d=Math.hypot(cx-pixelX,cy-pixelY);
+@@ -288,10 +289,7 @@ final class L3ReorderEngine {
+ 
+     private static boolean overlap1D(int a0,int a1,int b0,int b1){return a0<b1&&a1>b0;}
+     private static int clamp(int v,int lo,int hi){return Math.max(lo,Math.min(hi,v));}
+-    private static void mark(boolean[][] grid,int x,int y,int sx,int sy,boolean value){if(grid==null)return;for(int i=Math.max(0,x);i<x+sx&&i<grid.length;i++)for(int j=Math.max(0,y);j<y+sy&&j<grid[i].length;j++)grid[i][j]=value;}
+-    private boolean isVacant(boolean[][] grid,int x,int y,int sx,int sy){if(x<0||y<0||sx<1||sy<1||x+sx>countX||y+sy>countY)return false;for(int i=x;i<x+sx;i++)for(int j=y;j<y+sy;j++)if(grid[i][j])return false;return true;}
+-    private static boolean[][] copyGrid(boolean[][] src){boolean[][] d=new boolean[src.length][];for(int i=0;i<src.length;i++)d[i]=src[i].clone();return d;}
+-    private static void restoreGrid(boolean[][] dst,boolean[][] src){for(int i=0;i<dst.length;i++)System.arraycopy(src[i],0,dst[i],0,dst[i].length);}
++    private static void markGrid(boolean[][] grid,int x,int y,int sx,int sy,boolean value){if(grid==null)return;for(int i=Math.max(0,x);i<x+sx&&i<grid.length;i++)for(int j=Math.max(0,y);j<y+sy&&j<grid[i].length;j++)grid[i][j]=value;}
+     private static void restoreState(Solution dst,Solution src){dst.map.clear();dst.sortedIds.clear();for(Map.Entry<String,CellAndSpan> e:src.map.entrySet())dst.map.put(e.getKey(),e.getValue().copy());dst.sortedIds.addAll(src.sortedIds);dst.intersectingIds=new ArrayList<>(src.intersectingIds);dst.cellX=src.cellX;dst.cellY=src.cellY;dst.spanX=src.spanX;dst.spanY=src.spanY;dst.isSolution=src.isSolution;}
+ 
+     List<ClassicLayoutStore.Item> toItems(Solution s,ClassicLayoutStore.Item moving,int page){
