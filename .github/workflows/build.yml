@@ -79,6 +79,16 @@ jobs:
           grep -n "DRAG_MODE_CREATE_FOLDER" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
           grep -n "folderCreationRadius" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
 
+      - name: Apply Launcher3 temporary commit patch
+        run: |
+          base64 --decode ci/patches/launcher3-temp-commit.patch.gz.b64 > /tmp/launcher3-temp-commit.patch.gz
+          gzip -dc /tmp/launcher3-temp-commit.patch.gz > /tmp/launcher3-temp-commit.patch
+          cd source
+          patch --batch --forward -p1 < /tmp/launcher3-temp-commit.patch
+          grep -n "versionCode\\|versionName" app/build.gradle
+          grep -n "commitTempPlacement" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
+          grep -n "commitSamePagePlan" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
@@ -99,12 +109,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.07-Launcher3-Drag-Modes-release.apk
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.08-Launcher3-Temp-Commit-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FeedLauncher-v0.31.07-Launcher3-Drag-Modes-APK
-          path: out/FeedLauncher-v0.31.07-Launcher3-Drag-Modes-release.apk
+          name: FeedLauncher-v0.31.08-Launcher3-Temp-Commit-APK
+          path: out/FeedLauncher-v0.31.08-Launcher3-Temp-Commit-release.apk
           if-no-files-found: error
           retention-days: 14
