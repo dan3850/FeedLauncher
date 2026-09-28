@@ -89,6 +89,16 @@ jobs:
           grep -n "commitTempPlacement" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
           grep -n "commitSamePagePlan" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
 
+      - name: Apply Launcher3 reorder preview patch
+        run: |
+          base64 --decode ci/patches/launcher3-reorder-preview.patch.gz.b64 > /tmp/launcher3-reorder-preview.patch.gz
+          gzip -dc /tmp/launcher3-reorder-preview.patch.gz > /tmp/launcher3-reorder-preview.patch
+          cd source
+          patch --batch --forward -p1 < /tmp/launcher3-reorder-preview.patch
+          grep -n "versionCode\\|versionName" app/build.gradle
+          test -f app/src/main/java/br/com/danilo/feedlauncher/classic/L3ReorderPreviewAnimation.java
+          grep -n "showReorderHint" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
@@ -109,12 +119,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.08-Launcher3-Temp-Commit-release.apk
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.09-Launcher3-Reorder-Preview-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FeedLauncher-v0.31.08-Launcher3-Temp-Commit-APK
-          path: out/FeedLauncher-v0.31.08-Launcher3-Temp-Commit-release.apk
+          name: FeedLauncher-v0.31.09-Launcher3-Reorder-Preview-APK
+          path: out/FeedLauncher-v0.31.09-Launcher3-Reorder-Preview-release.apk
           if-no-files-found: error
           retention-days: 14
