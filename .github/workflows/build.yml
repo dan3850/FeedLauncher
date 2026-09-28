@@ -139,6 +139,16 @@ jobs:
           grep -n "DROP_OUTLINE_COUNT" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicCellLayout.java
           grep -n "SPRING_LOADED_SCALE" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
 
+      - name: Apply Launcher3 containers and persistence patch
+        run: |
+          base64 --decode ci/patches/launcher3-containers-persistence.patch.gz.b64 > /tmp/launcher3-containers-persistence.patch.gz
+          gzip -dc /tmp/launcher3-containers-persistence.patch.gz > /tmp/launcher3-containers-persistence.patch
+          cd source
+          patch --batch --forward -p1 < /tmp/launcher3-containers-persistence.patch
+          grep -n "versionCode\\|versionName" app/build.gradle
+          grep -n "KEY_HOME_BACKUP" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicHomeActivity.java
+          grep -n "exportState" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicLayoutStore.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
@@ -159,12 +169,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.13-Launcher3-Mechanics-Pack-release.apk
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.14-Launcher3-Containers-Persistence-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FeedLauncher-v0.31.13-Launcher3-Mechanics-Pack-APK
-          path: out/FeedLauncher-v0.31.13-Launcher3-Mechanics-Pack-release.apk
+          name: FeedLauncher-v0.31.14-Launcher3-Containers-Persistence-APK
+          path: out/FeedLauncher-v0.31.14-Launcher3-Containers-Persistence-release.apk
           if-no-files-found: error
           retention-days: 14
