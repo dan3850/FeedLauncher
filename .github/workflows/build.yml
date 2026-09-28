@@ -42,6 +42,13 @@ jobs:
           mkdir -p source
           unzip -q ci/FeedLauncher-v0.31.03b-GitHub-Source.zip -d source
 
+      - name: Apply Launcher3 foundation patch
+        run: |
+          cd source
+          patch --batch --forward -p1 < ../ci/patches/launcher3-foundation.patch
+          grep -n "versionCode\|versionName" app/build.gradle
+          test -f app/src/main/java/br/com/danilo/feedlauncher/classic/L3GridOccupancy.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
@@ -62,12 +69,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.03b-Recovery-release.apk
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.04-Launcher3-Foundation-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FeedLauncher-v0.31.03b-Recovery-APK
-          path: out/FeedLauncher-v0.31.03b-Recovery-release.apk
+          name: FeedLauncher-v0.31.04-Launcher3-Foundation-APK
+          path: out/FeedLauncher-v0.31.04-Launcher3-Foundation-release.apk
           if-no-files-found: error
           retention-days: 14
