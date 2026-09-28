@@ -109,6 +109,16 @@ jobs:
           test -f app/src/main/java/br/com/danilo/feedlauncher/classic/L3DragView.java
           grep -n "captureDestination" app/src/main/java/br/com/danilo/feedlauncher/classic/L3ItemDragController.java
 
+      - name: Apply Launcher3 spring pages patch
+        run: |
+          base64 --decode ci/patches/launcher3-spring-pages.patch.gz.b64 > /tmp/launcher3-spring-pages.patch.gz
+          gzip -dc /tmp/launcher3-spring-pages.patch.gz > /tmp/launcher3-spring-pages.patch
+          cd source
+          patch --batch --forward -p1 < /tmp/launcher3-spring-pages.patch
+          grep -n "versionCode\\|versionName" app/build.gradle
+          grep -n "beginDragPageSession" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
+          grep -n "EDGE_SCROLL_HINT_DURATION" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
@@ -129,12 +139,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.10-Launcher3-DragView-Drop-release.apk
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.11-Launcher3-Spring-Pages-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FeedLauncher-v0.31.10-Launcher3-DragView-Drop-APK
-          path: out/FeedLauncher-v0.31.10-Launcher3-DragView-Drop-release.apk
+          name: FeedLauncher-v0.31.11-Launcher3-Spring-Pages-APK
+          path: out/FeedLauncher-v0.31.11-Launcher3-Spring-Pages-release.apk
           if-no-files-found: error
           retention-days: 14
