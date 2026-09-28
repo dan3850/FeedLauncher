@@ -159,6 +159,14 @@ jobs:
           test -f app/src/main/java/br/com/danilo/feedlauncher/classic/L3FolderReorderController.java
           grep -n "refreshPages" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
 
+      - name: Apply Launcher3 folder reorder geometry hotfix
+        run: |
+          base64 --decode ci/patches/launcher3-folder-reorder-hotfix.patch.gz.b64 > /tmp/launcher3-folder-reorder-hotfix.patch.gz
+          gzip -dc /tmp/launcher3-folder-reorder-hotfix.patch.gz > /tmp/launcher3-folder-reorder-hotfix.patch
+          cd source
+          patch --batch --forward -p1 < /tmp/launcher3-folder-reorder-hotfix.patch
+          grep -n "captureBounds" app/src/main/java/br/com/danilo/feedlauncher/classic/L3FolderReorderController.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
