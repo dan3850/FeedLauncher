@@ -1,0 +1,72 @@
+name: Build FeedLauncher APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9 with cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+          cache-read-only: false
+
+      - name: Extract source
+        run: |
+          mkdir -p source
+          unzip -q ci/FeedLauncher-v0.31.03b-GitHub-Source.zip -d source
+
+      - name: Create temporary CI signing key
+        working-directory: source
+        run: |
+          keytool -genkeypair -v \
+            -keystore development.keystore \
+            -storepass android \
+            -keypass android \
+            -alias feed \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=FeedLauncher CI,O=FeedLauncher,C=BR"
+
+      - name: Build release APK
+        working-directory: source
+        run: gradle assembleRelease --build-cache --parallel --no-daemon
+
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.03b-Recovery-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FeedLauncher-v0.31.03b-Recovery-APK
+          path: out/FeedLauncher-v0.31.03b-Recovery-release.apk
+          if-no-files-found: error
+          retention-days: 14
