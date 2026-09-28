@@ -149,6 +149,16 @@ jobs:
           grep -n "KEY_HOME_BACKUP" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicHomeActivity.java
           grep -n "exportState" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicLayoutStore.java
 
+      - name: Apply Launcher3 folder reorder and page refresh patch
+        run: |
+          base64 --decode ci/patches/launcher3-folder-reorder-page-refresh.patch.gz.b64 > /tmp/launcher3-folder-reorder-page-refresh.patch.gz
+          gzip -dc /tmp/launcher3-folder-reorder-page-refresh.patch.gz > /tmp/launcher3-folder-reorder-page-refresh.patch
+          cd source
+          patch --batch --forward -p1 < /tmp/launcher3-folder-reorder-page-refresh.patch
+          grep -n "versionCode\\|versionName" app/build.gradle
+          test -f app/src/main/java/br/com/danilo/feedlauncher/classic/L3FolderReorderController.java
+          grep -n "refreshPages" app/src/main/java/br/com/danilo/feedlauncher/classic/ClassicWorkspace.java
+
       - name: Create temporary CI signing key
         working-directory: source
         run: |
@@ -169,12 +179,12 @@ jobs:
       - name: Collect APK
         run: |
           mkdir -p out
-          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.14-Launcher3-Containers-Persistence-release.apk
+          cp source/app/build/outputs/apk/release/*.apk out/FeedLauncher-v0.31.15-Launcher3-Folder-Reorder-Page-Refresh-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FeedLauncher-v0.31.14-Launcher3-Containers-Persistence-APK
-          path: out/FeedLauncher-v0.31.14-Launcher3-Containers-Persistence-release.apk
+          name: FeedLauncher-v0.31.15-Launcher3-Folder-Reorder-Page-Refresh-APK
+          path: out/FeedLauncher-v0.31.15-Launcher3-Folder-Reorder-Page-Refresh-release.apk
           if-no-files-found: error
           retention-days: 14
